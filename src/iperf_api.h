@@ -72,6 +72,9 @@ struct iperf_time;
 #define OPT_REPEATING_PAYLOAD 18
 #define OPT_EXTRA_DATA 19
 
+/*added by brant for socket test only*/
+#define OPT_SOCKET_ONLY 20
+
 /* states */
 #define TEST_START 1
 #define TEST_RUNNING 2

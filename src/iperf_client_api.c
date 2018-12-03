@@ -430,8 +430,10 @@ iperf_client_end(struct iperf_test *test)
         return -1;
 
     /* Close control socket */
-    if (test->ctrl_sck)
+    if (test->ctrl_sck != -1) {
         close(test->ctrl_sck);
+        test->ctrl_sck = -1;
+    }
 
     return 0;
 }
@@ -447,32 +449,58 @@ iperf_run_client(struct iperf_test * test)
     struct timeval* timeout = NULL;
     struct iperf_stream *sp;
 
-    if (test->affinity != -1)
-	if (iperf_setaffinity(test, test->affinity) != 0)
-	    return -1;
-
-    if (test->json_output)
-	if (iperf_json_start(test) < 0)
-	    return -1;
-
-    if (test->json_output) {
-	cJSON_AddItemToObject(test->json_start, "version", cJSON_CreateString(version));
-	cJSON_AddItemToObject(test->json_start, "system_info", cJSON_CreateString(get_system_info()));
-    } else if (test->verbose) {
-	iperf_printf(test, "%s\n", version);
-	iperf_printf(test, "%s", "");
-	iperf_printf(test, "%s\n", get_system_info());
-	iflush(test);
+    if (test->affinity != -1) {
+		if (iperf_setaffinity(test, test->affinity) != 0)
+		    return -1;
     }
 
-    /* Start the client and connect to the server */
-    if (iperf_connect(test) < 0)
-        return -1;
+    if (test->json_output) {
+		if (iperf_json_start(test) < 0)
+		    return -1;
+	}
+	
+    if (test->json_output) {
+		cJSON_AddItemToObject(test->json_start, "version", cJSON_CreateString(version));
+		cJSON_AddItemToObject(test->json_start, "system_info", cJSON_CreateString(get_system_info()));
+    } else if (test->verbose) {
+		iperf_printf(test, "%s\n", version);
+		iperf_printf(test, "%s", "");
+		iperf_printf(test, "%s\n", get_system_info());
+		iflush(test);
+    }
 
+    if (test->settings->socket_only) {
+		iperf_printf(test, "%s\n", "Running on socket only mode");
+		iflush(test);
+		iperf_create_streams(test);
+
+        if (iperf_init_test(test) < 0)
+            return -1;
+            
+        if (create_client_timers(test) < 0)
+            return -1;
+            
+        if (create_client_omit_timer(test) < 0)
+            return -1;
+            
+	    if (!test->reverse) {
+			if (iperf_create_send_timers(test) < 0)
+				return -1;
+		}
+		
+		test->state = TEST_RUNNING;
+	} else {
+	    /* Start the client and connect to the server */
+	    if (iperf_connect(test) < 0)
+	        return -1;
+	}
     /* Begin calculating CPU utilization */
     cpu_util(NULL);
 
     startup = 1;
+
+
+
     while (test->state != IPERF_DONE) {
 	memcpy(&read_set, &test->read_set, sizeof(fd_set));
 	memcpy(&write_set, &test->write_set, sizeof(fd_set));
@@ -483,13 +511,16 @@ iperf_run_client(struct iperf_test * test)
   	    i_errno = IESELECT;
 	    return -1;
 	}
-	if (result > 0) {
-	    if (FD_ISSET(test->ctrl_sck, &read_set)) {
- 	        if (iperf_handle_message_client(test) < 0) {
-		    return -1;
+
+	if (test->ctrl_sck != -1) {
+		if (result > 0) {
+		    if (FD_ISSET(test->ctrl_sck, &read_set)) {
+	 	        if (iperf_handle_message_client(test) < 0) {
+			    return -1;
+			}
+			FD_CLR(test->ctrl_sck, &read_set);
+		    }
 		}
-		FD_CLR(test->ctrl_sck, &read_set);
-	    }
 	}
 
 	if (test->state == TEST_RUNNING) {
@@ -497,7 +528,8 @@ iperf_run_client(struct iperf_test * test)
 	    /* Is this our first time really running? */
 	    if (startup) {
 	        startup = 0;
-
+		}
+		
 		// Set non-blocking for non-UDP tests
 		if (test->protocol->id != Pudp) {
 		    SLIST_FOREACH(sp, &test->streams, streams) {
@@ -507,49 +539,54 @@ iperf_run_client(struct iperf_test * test)
 	    }
 
 	    if (test->reverse) {
-		// Reverse mode. Client receives.
-		if (iperf_recv(test, &read_set) < 0)
-		    return -1;
-	    } else {
-		// Regular mode. Client sends.
-		if (iperf_send(test, &write_set) < 0)
-		    return -1;
-	    }
+			// Reverse mode. Client receives.
+			if (iperf_recv(test, &read_set) < 0)
+			    return -1;
+		    } else {
+			// Regular mode. Client sends.
+			if (iperf_send(test, &write_set) < 0)
+			    return -1;
+		    }
 
             /* Run the timers. */
             iperf_time_now(&now);
             tmr_run(&now);
 
-	    /* Is the test done yet? */
-	    if ((!test->omitting) &&
-	        ((test->duration != 0 && test->done) ||
-	         (test->settings->bytes != 0 && test->bytes_sent >= test->settings->bytes) ||
-	         (test->settings->blocks != 0 && test->blocks_sent >= test->settings->blocks))) {
+		    /* Is the test done yet? */
+		    if ((!test->omitting) &&
+		        ((test->duration != 0 && test->done) ||
+		         (test->settings->bytes != 0 && test->bytes_sent >= test->settings->bytes) ||
+		         (test->settings->blocks != 0 && test->blocks_sent >= test->settings->blocks))) {
 
-		// Unset non-blocking for non-UDP tests
-		if (test->protocol->id != Pudp) {
-		    SLIST_FOREACH(sp, &test->streams, streams) {
-			setnonblocking(sp->socket, 0);
-		    }
+				// Unset non-blocking for non-UDP tests
+				if (test->protocol->id != Pudp) {
+				    SLIST_FOREACH(sp, &test->streams, streams) {
+					setnonblocking(sp->socket, 0);
+				    }
+				}
+
+				/* Yes, done!  Send TEST_END. */
+				test->done = 1;
+				cpu_util(test->cpu_util);
+				test->stats_callback(test);
+				if (test->settings->socket_only) {
+					if (test->on_test_finish)
+						test->on_test_finish(test);
+					iperf_client_end(test);
+				} else {
+					if (iperf_set_send_state(test, TEST_END) != 0)
+					    return -1;
+			    }
 		}
-
-		/* Yes, done!  Send TEST_END. */
-		test->done = 1;
-		cpu_util(test->cpu_util);
-		test->stats_callback(test);
-		if (iperf_set_send_state(test, TEST_END) != 0)
-		    return -1;
-	    }
-	}
-	// If we're in reverse mode, continue draining the data
-	// connection(s) even if test is over.  This prevents a
-	// deadlock where the server side fills up its pipe(s)
-	// and gets blocked, so it can't receive state changes
-	// from the client side.
-	else if (test->reverse && test->state == TEST_END) {
-	    if (iperf_recv(test, &read_set) < 0)
-		return -1;
-	}
+		// If we're in reverse mode, continue draining the data
+		// connection(s) even if test is over.  This prevents a
+		// deadlock where the server side fills up its pipe(s)
+		// and gets blocked, so it can't receive state changes
+		// from the client side.
+		else if (test->reverse && test->state == TEST_END) {
+		    if (iperf_recv(test, &read_set) < 0)
+			return -1;
+		}
     }
 
     if (test->json_output) {

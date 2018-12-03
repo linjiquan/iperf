@@ -750,6 +750,7 @@ iperf_parse_arguments(struct iperf_test *test, int argc, char **argv)
         {"version6", no_argument, NULL, '6'},
         {"tos", required_argument, NULL, 'S'},
         {"dscp", required_argument, NULL, OPT_DSCP},
+		{"sock", no_argument, NULL, OPT_SOCKET_ONLY}, /*Added by brant for socket test only */
 	{"extra-data", required_argument, NULL, OPT_EXTRA_DATA},
 #if defined(HAVE_FLOWLABEL)
         {"flowlabel", required_argument, NULL, 'L'},
@@ -1151,6 +1152,9 @@ iperf_parse_arguments(struct iperf_test *test, int argc, char **argv)
 		test->settings->connect_timeout = unit_atoi(optarg);
 		client_flag = 1;
 		break;
+		case OPT_SOCKET_ONLY:
+		test->settings->socket_only = 1;
+		break;
 	    case 'h':
 		usage_long(stdout);
 		exit(0);
@@ -1296,6 +1300,10 @@ int
 iperf_set_send_state(struct iperf_test *test, signed char state)
 {
     test->state = state;
+
+    if (test->ctrl_sck == -1)
+    	return 0;
+    	
     if (Nwrite(test->ctrl_sck, (char*) &state, sizeof(state), Ptcp) < 0) {
 	i_errno = IESENDMESSAGE;
 	return -1;
@@ -1344,6 +1352,7 @@ iperf_send(struct iperf_test *test, fd_set *write_setP)
 	    iperf_time_now(&now);
 	streams_active = 0;
 	SLIST_FOREACH(sp, &test->streams, streams) {
+		if (test->settings->socket_only) sp->green_light = 1;
 	    if ((sp->green_light &&
 		 (write_setP == NULL || FD_ISSET(sp->socket, write_setP)))) {
 		if ((r = sp->snd(sp)) < 0) {
@@ -2195,6 +2204,7 @@ iperf_defaults(struct iperf_test *testp)
     testp->server_port = PORT;
     testp->ctrl_sck = -1;
     testp->prot_listener = -1;
+    testp->settings->socket_only = 0;/*Added by brant for socket test*/
 
     testp->stats_callback = iperf_stats_callback;
     testp->reporter_callback = iperf_reporter_callback;

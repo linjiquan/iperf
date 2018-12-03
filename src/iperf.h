@@ -154,6 +154,7 @@ struct iperf_settings
     EVP_PKEY  *client_rsa_pubkey;
 #endif // HAVE_SSL
     int	      connect_timeout;	    /* socket connection timeout, in ms */
+    int		  socket_only; /*socket test only, added by brant*/
 };
 
 struct iperf_test;

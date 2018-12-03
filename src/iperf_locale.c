@@ -125,6 +125,8 @@ const char usage_longstr[] = "Usage: iperf3 [-s|-c host] [options]\n"
 #endif //HAVE_SSL
                            "Client specific:\n"
                            "  -c, --client    <host>    run in client mode, connecting to <host>\n"
+						   "  --sock                    used as socket client only, no ctrl connection established.\n"
+                           
 #if defined(HAVE_SCTP)
                            "  --sctp                    use SCTP rather than TCP\n"
                            "  -X, --xbind <name>        bind SCTP association to links\n"
